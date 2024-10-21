@@ -1,0 +1,8 @@
+body {
+  margin: 0;
+}
+
+#img_wrapper {
+  width: 100%;
+  min-height: 100vH;
+}
