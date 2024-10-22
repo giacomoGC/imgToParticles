@@ -16,12 +16,20 @@ const calculatedHeight = container.clientWidth / originalAspectRatio;
 const planeHeight = 2;
 const planeWidth = planeHeight * originalAspectRatio;
 const numPoints = 90 * 90
-const indices = new Uint16Array(numPoints);
 const offsets = new Float32Array(numPoints * 3);
 const angles = new Float32Array(numPoints);
+const scales = new Float32Array(numPoints);
 const spheres = [];
 const pixelDataLength = imageWidth * imageHeight * 4
 let pixelData;
+
+const colors = new Float32Array(numPoints * 3);
+
+for (let i = 0; i < numPoints; i++) {
+  colors[i * 3 + 0] = 1;
+  colors[i * 3 + 1] = 0.2;
+  colors[i * 3 + 2] = 1;
+}
 
 const images = [
   '/img/giacomo2-neutral-modified.jpg',
@@ -45,6 +53,14 @@ function extractPixelData(image) {
   return data;
 }
 
+function updateInstanceColor(index, newColor) {
+  colors[index * 3 + 0] = newColor.r; // Red
+  colors[index * 3 + 1] = newColor.g; // Green
+  colors[index * 3 + 2] = newColor.b; // Blue
+  
+  mesh.geometry.attributes.instanceColor.needsUpdate = true;
+}
+
 function rgbaToGrayscale(r, g, b, a) {
   const grayscale = 0.299 * r + 0.587 * g + 0.114 * b;
 
@@ -60,39 +76,65 @@ container.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 
-const bufferGeometry = new THREE.InstancedBufferGeometry();
+const material = new THREE.MeshBasicMaterial({
+  color: `rgb(255, 255, 255)`,
+  transparent: false,
+  // vertexColors: true,
+  //opacity: alpha / 255,
+  wireframe: false,
+});
 
-console.log(perlin.generatePerlinNoise(imageWidth, imageHeight))
+const geometry = new THREE.SphereGeometry(0.25, 4, 4);
+
+const bufferGeometry = new THREE.InstancedBufferGeometry().copy(geometry);
+
+// Fill attributes with initial values
+for (let i = 0; i < numPoints; i++) {
+  const x = (i % imageWidth);
+  const y = Math.floor(i / imageWidth);
+
+  offsets[i * 3 + 0] = x - xOffset;   // X position
+  offsets[i * 3 + 1] = yOffset - y;   // Y position
+  offsets[i * 3 + 2] = 0;       // Z position
+
+  scales[i] = 1;  // Initial scale for each sphere
+  angles[i] = Math.random() * Math.PI;  // Random angle for rotation
+}
+
+bufferGeometry.setAttribute('offset', new THREE.InstancedBufferAttribute(offsets, 3, false));
+bufferGeometry.setAttribute('scale', new THREE.InstancedBufferAttribute(scales, 1, false));
+bufferGeometry.setAttribute('angle', new THREE.InstancedBufferAttribute(angles, 1, false));
+
 const noise = perlin.generatePerlinNoise(imageWidth, imageHeight)
 
-for (let i = 0; i < pixelDataLength; i += 4) {
-  const geometry = new THREE.SphereGeometry(0.25, 16, 16);
-  const material = new THREE.MeshStandardMaterial({
-    color: `rgb(255, 255, 255)`,
-    transparent: false,
-    //opacity: alpha / 255
-  });
-  
-  const sphere = new THREE.Mesh(geometry, material);
+const mesh = new THREE.InstancedMesh(bufferGeometry, material, numPoints);
 
-  const randomX = noise[i];
-  const randomY = noise[i + 1];
+// mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(colors, 3));
 
-  gsap.to(sphere.position, {
-    x: (((randomX - 0.5) * 200) - xOffset),
-    y: (yOffset - ((randomY - 0.5) * 200)),
-    z: 0,
-    duration: 5,
-    ease: 'power2.inOut',
-    delay: i * 0.0001,
-  })
+// mesh.geometry.attributes.instanceColor.needsUpdate = true;
 
-  // sphere.position.set((randomX - 0.5) * 200, (randomY - 0.5) * 200, 0)
+scene.add(mesh);
 
-  scene.add(sphere);
+const dummy = new THREE.Object3D();  // A helper object to set positions
 
-  spheres.push(sphere);
+for (let i = 0; i < numPoints; i++) {
+  dummy.position.set(
+    offsets[i * 3],     // X position
+    offsets[i * 3 + 1], // Y position
+    offsets[i * 3 + 2]  // Z position
+  );
+
+  // updateInstanceColor(i, newColor)
+
+  dummy.updateMatrix();
+
+  mesh.setMatrixAt(i, dummy.matrix);
+
+  // spheres[i].material.color.set(`rgb(${red}, ${green}, ${blue})`)
 }
+
+// Make sure the instance matrix updates
+// mesh.instanceMatrix.needsUpdate = true;
 
 let isFirstLoad = true
 
@@ -171,7 +213,7 @@ pointLight.position.set(5, 5, 5);
 console.log(scene)
 
 // Set camera position
-camera.position.z = 85;
+camera.position.z = 150;
 
 // Handle window resize
 window.addEventListener('resize', () => {
@@ -183,6 +225,8 @@ window.addEventListener('resize', () => {
 // Render loop
 function animate() {
   requestAnimationFrame(animate);
+
+  // mesh.geometry.attributes.instanceColor.needsUpdate = true;
 
   controls.update();  // Only required if controls.enableDamping is set to true
 
