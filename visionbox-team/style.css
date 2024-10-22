@@ -6,3 +6,9 @@ body {
   width: 100%;
   min-height: 100vH;
 }
+
+#controls {
+  position: fixed;
+  top: 15px;
+  right: 15px;
+}
