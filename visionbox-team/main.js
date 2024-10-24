@@ -164,6 +164,7 @@ function setAttributesFromImage(image, isFirstLoad) {
   const texture = new THREE.TextureLoader().load(image, (texture) => {
     pixelData = extractPixelData(texture.image)
     let newColors = new Float32Array(numPoints * 4);
+    let oldColors = new Float32Array(mesh.geometry.attributes.instanceColor.array);
 
     for (let i = 0; i < pixelData.length; i +=4) {
       const red = pixelData[i] / 255;
@@ -184,34 +185,51 @@ function setAttributesFromImage(image, isFirstLoad) {
       const b = newColors[i * 4 + 2]; // Blue
       const a = 0.5;
 
-      gsap.to(newColors, {
-        [i * 4 + 0]: r, // Animate red channel
-        [i * 4 + 1]: g, // Animate green channel
-        [i * 4 + 2]: b,
-        [i * 4 + 3]: a,
-        duration: 12, // Duration of animation
+      // Animate each color channel individually
+      gsap.to({
+        r: oldColors[i * 4 + 0],
+        g: oldColors[i * 4 + 1],
+        b: oldColors[i * 4 + 2],
+        a: oldColors[i * 4 + 3]
+      }, {
+        r: r, // Target red value
+        g: g, // Target green value
+        b: b, // Target blue value
+        a: a, // Target alpha value
+        duration: 0.4, // Animation duration
         ease: 'power2.inOut',
-        onUpdate: () => {
-          // Update the geometry color attributes during animation
-          mesh.geometry.attributes.instanceColor.array[i * 4 + 0] = newColors[i * 4 + 0]; // Update red channel
-          mesh.geometry.attributes.instanceColor.array[i * 4 + 1] = newColors[i * 4 + 1]; // Update green channel
-          mesh.geometry.attributes.instanceColor.array[i * 4 + 2] = newColors[i * 4 + 2]; // Update blue channel
-          mesh.geometry.attributes.instanceColor.array[i * 4 + 3] = 0.5; // Update blue channel
-          mesh.geometry.attributes.instanceColor.needsUpdate = true;
-        }
+        onUpdate: function() {
+          // Update the geometry color attributes during the animation
+          mesh.geometry.attributes.instanceColor.array[i * 4 + 0] = r; // Red
+          mesh.geometry.attributes.instanceColor.array[i * 4 + 1] = g; // Green
+          mesh.geometry.attributes.instanceColor.array[i * 4 + 2] = b; // Blue
+          mesh.geometry.attributes.instanceColor.array[i * 4 + 3] = a; // Alpha
+          mesh.geometry.attributes.instanceColor.needsUpdate = true; // Flag color array for update
+         console.log(r)   
+          }
       });
     }
 
-    console.log(mesh.geometry.attributes.instanceColor)
+    const indices = Array.from({ length: numPoints }, (_, i) => i); // Create an array of indices
+
+    for (let i = 0; i < numPoints; i++) {
+      newColors[(numPoints) * 4 + 3] = 0;
+      mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(newColors, 4));
+      mesh.geometry.attributes.instanceColor.needsUpdate = true;
+    }
     
-    // mesh.geometry.setAttribute('scale', new THREE.InstancedBufferAttribute(newScales, 1));
+    console.log(newColors)
+    
+    mesh.geometry.setAttribute('scale', new THREE.InstancedBufferAttribute(newScales, 1));
+    // mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(newColors, 4));
     mesh.instanceMatrix.needsUpdate = true;
+    mesh.geometry.attributes.instanceColor.needsUpdate = true;
     mesh.geometry.attributes.scale.needsUpdate = true;
 
     isFirstLoad = false;
 
-    // mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(newColors, 4));
-
+    
+    console.log(mesh.geometry.attributes.instanceColor)
   });
 }
 
