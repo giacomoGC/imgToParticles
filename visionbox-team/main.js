@@ -2,7 +2,11 @@ import * as THREE from 'three'
 import { GUI } from 'dat.gui'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { gsap } from 'gsap';
-import * as perlin from 'perlin-noise';
+import createVShape from './functions/createVShape.js';
+import extractPixelData from './functions/extractPixelData.js';
+import shuffleArray from './functions/shuffleArray.js';
+import createSpiral from './functions/createSpiral.js';
+import displaceRandom from './functions/displaceRandom.js'
 
 const container = document.querySelector('#img_wrapper');
 let planeAspect;
@@ -23,35 +27,19 @@ const spheres = [];
 const pixelDataLength = imageWidth * imageHeight * 4
 let pixelData;
 
-const colors = new Float32Array(numPoints * 3);
+const colors = new Float32Array(numPoints * 4);
 
 for (let i = 0; i < numPoints; i++) {
   colors[i * 3 + 0] = 0.5;
   colors[i * 3 + 1] = 0.5;
   colors[i * 3 + 2] = 0.5;
+  colors[i * 3 + 3] = 1;
 }
 
 const images = [
   '/img/giacomo2-neutral-modified.jpg',
   '/img/lo-90-bw.jpg'
 ]
-
-function extractPixelData(image) {
-  // Create an off-screen canvas to extract pixel data
-  const canvas = document.createElement('canvas');
-  canvas.width = image.width;
-  canvas.height = image.height;
-
-  const context = canvas.getContext('2d');
-  // Draw the image onto the canvas
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-  // Get pixel data
-  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data; // This is a flat array containing the RGBA values of each pixel
-  
-  return data;
-}
 
 function updateInstanceColor(index, newColor) {
   colors[index * 3 + 0] = newColor.r; // Red
@@ -88,13 +76,19 @@ const material = new THREE.ShaderMaterial({
     uniform float uTime;
 
     float random(vec2 uv) {
-        return fract(sin(dot(uv.xy, vec2(12.9898, 78.233))) * 43758.5453);
+      return fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
+    }
+
+    float randomInRange(vec2 uv) {
+        return random(uv) * 2.0 - 1.0;
     }
 
     void main() {
       vColor = instanceColor;
-      vec3 pos = (position * scale + offset) + (sin(uTime) * 5.0 * random(uv));
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      vec3 pos = position;
+      vec3 newPos = (position * scale + offset);
+
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
     }
   `,
   fragmentShader: `
@@ -118,7 +112,7 @@ for (let i = 0; i < numPoints; i++) {
   offsets[i * 3 + 1] = yOffset - y;
   offsets[i * 3 + 2] = 0;
 
-  scales[i] = (Math.random() + 0.1) * 1.5;
+  scales[i] = (Math.random() + 0.5) * 1.2;
   angles[i] = Math.random() * Math.PI;
 }
 
@@ -136,123 +130,88 @@ mesh.geometry.attributes.instanceColor.needsUpdate = true;
 scene.add(mesh);
 
 let isFirstLoad = true
-const noise = perlin.generatePerlinNoise(imageWidth, imageHeight)
 
-let targetPosition;
-const vTopLeft = new THREE.Vector3(-44, 44, 0);
-const vTopRight = new THREE.Vector3(44, 44, 0);
-const vBottom = new THREE.Vector3(0, -44, 0);
+let newScales = scales
+const indices = Array.from({ length: numPoints }, (_, i) => i); // Create an array of indices
+  
+shuffleArray(indices);
 
-// Function to shuffle an array (Fisher-Yates algorithm)
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1)); // Random index from 0 to i
-    [array[i], array[j]] = [array[j], array[i]]; // Swap elements
-  }
+for (let i = 0; i < numPoints; i++) {
+  const initialScale = scales[i];
+  const idx = indices[i];
+  
+  // Animate each instance's scale using GSAP
+  gsap.to(scales, {
+    [idx]: Math.random() * 1.15 + 0.5,
+    duration: 2,
+    ease: 'power2.inOut',
+    onUpdate: () => {
+      mesh.geometry.attributes.scale.array[idx] = newScales[idx];
+      mesh.geometry.attributes.scale.needsUpdate = true;
+    },
+    delay: i * 0.001,
+    yoyo: true,
+    repeat: -1,
+  });
 }
 
-function createVShape() {
-  let newOffsets = []
+// displaceRandom(numPoints, offsets, mesh, imageWidth, imageHeight)
 
-  // We'll animate points in random order!
-  const indices = Array.from({ length: numPoints }, (_, i) => i); // Create an array of indices
-  
-  shuffleArray(indices);
-  
-  for (let i = 0; i < numPoints; i++) {
-    let t = i / (numPoints - 1);  // Normalized parameter
-    const idx = indices[i];
-    const initialOffsetX = offsets[idx * 3]; // Save original offsets
-    const initialOffsetY = offsets[idx * 3 + 1];
-
-    // Interpolate positions
-    if (t < 0.5) {
-      // Left side of the V
-      const alpha = t * 2;  // Scale to 0 to 1
-
-      if (i % 15 === 0) {
-        newOffsets[i * 3] = THREE.MathUtils.lerp(vTopLeft.x, vBottom.x, alpha);
-      } else {
-        newOffsets[i * 3] = THREE.MathUtils.lerp(vTopLeft.x, vBottom.x, alpha) - Math.random() * 14;
-      }
-      newOffsets[i * 3 + 1] = THREE.MathUtils.lerp(vTopLeft.y, vBottom.y, alpha);
-    } else {
-      // Right side of the V
-      const alpha = (t - 0.5) * 2; // Scale to 0 to 1
-
-      if (i % 15 === 0) {
-        newOffsets[i * 3] = THREE.MathUtils.lerp(vTopRight.x, vBottom.x, alpha) - 1;
-      } else {
-        newOffsets[i * 3] = THREE.MathUtils.lerp(vTopRight.x, vBottom.x, alpha) - Math.random() * 3 - 1;
-      }
-      newOffsets[i * 3 + 1] = THREE.MathUtils.lerp(vTopRight.y, vBottom.y, alpha);
-    }
-
-    newOffsets[i * 3 + 2] = 0;
-    newOffsets[i * 4 + 2] = 0;
-    newOffsets[i * 5 + 2] = 0;
-
-    gsap.to(offsets, {
-      [idx * 3]: newOffsets[i * 3],
-      [idx * 3 + 1]: newOffsets[i * 3 + 1],
-      [idx * 3 + 2]: newOffsets[i * 3 + 2],
-      duration: 2,
-      ease: 'power2.inOut',
-      onUpdate: () => {
-        mesh.geometry.attributes.offset.array[i * 3] = offsets[i * 3];
-        mesh.geometry.attributes.offset.array[i * 3 + 1] = offsets[i * 3 + 1];
-        mesh.geometry.attributes.offset.array[i * 3 + 2] = offsets[i * 3 + 2];
-        mesh.geometry.attributes.offset.needsUpdate = true;
-      },
-      // delay: i * 0.0001
-    });
-  }
-}
-
-createVShape()
+// createVShape(numPoints, offsets, mesh)
+//createSpiral(numPoints, offsets, scales, mesh)
 
 function setAttributesFromImage(image, isFirstLoad) {
   const texture = new THREE.TextureLoader().load(image, (texture) => {
     pixelData = extractPixelData(texture.image)
-    let newColors = new Float32Array(numPoints * 3);
+    let newColors = new Float32Array(numPoints * 4);
 
     for (let i = 0; i < pixelData.length; i +=4) {
       const red = pixelData[i] / 255;
       const green = pixelData[i+1] / 255;
       const blue = pixelData[i+2] / 255;
+      const alpha = pixelData[i+3] / 255;
       // const { r, g, b, a } = rgbaToGrayscale(red, green, blue, alpha);
 
       newColors[i + 0] = red;
       newColors[i + 1] = green;
       newColors[i + 2] = blue;
-      newColors[i + 3] = 1;
+      newColors[i + 3] = alpha;
     }
 
     for (let i = 0; i < numPoints; i++) {
-      const initialScale = scales[i];
-      
-      // Animate each instance's scale using GSAP
-      gsap.to(scales, {
-        [i]: Math.random() * 1.15 + 0.5,
-        duration: 1,
+      const r = newColors[i * 4 + 0]; // Red
+      const g = newColors[i * 4 + 1]; // Green
+      const b = newColors[i * 4 + 2]; // Blue
+      const a = 0.5;
+
+      gsap.to(newColors, {
+        [i * 4 + 0]: r, // Animate red channel
+        [i * 4 + 1]: g, // Animate green channel
+        [i * 4 + 2]: b,
+        [i * 4 + 3]: a,
+        duration: 12, // Duration of animation
         ease: 'power2.inOut',
         onUpdate: () => {
-          mesh.geometry.attributes.scale.array[i] = scales[i];
-          mesh.geometry.attributes.scale.needsUpdate = true;
-        },
-        delay: i * 0.001
+          // Update the geometry color attributes during animation
+          mesh.geometry.attributes.instanceColor.array[i * 4 + 0] = newColors[i * 4 + 0]; // Update red channel
+          mesh.geometry.attributes.instanceColor.array[i * 4 + 1] = newColors[i * 4 + 1]; // Update green channel
+          mesh.geometry.attributes.instanceColor.array[i * 4 + 2] = newColors[i * 4 + 2]; // Update blue channel
+          mesh.geometry.attributes.instanceColor.array[i * 4 + 3] = 0.5; // Update blue channel
+          mesh.geometry.attributes.instanceColor.needsUpdate = true;
+        }
       });
     }
 
-    console.log(scales)
+    console.log(mesh.geometry.attributes.instanceColor)
     
-    mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(newColors, 4));
     // mesh.geometry.setAttribute('scale', new THREE.InstancedBufferAttribute(newScales, 1));
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.geometry.attributes.instanceColor.needsUpdate = true;
     mesh.geometry.attributes.scale.needsUpdate = true;
 
     isFirstLoad = false;
+
+    // mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(newColors, 4));
+
   });
 }
 
@@ -277,7 +236,7 @@ pointLight.position.set(5, 5, 5);
 console.log(scene)
 
 // Set camera position
-camera.position.z = 100;
+camera.position.z = 80;
 
 // Handle window resize
 window.addEventListener('resize', () => {
