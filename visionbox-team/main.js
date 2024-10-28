@@ -11,8 +11,8 @@ import { createNoise2D } from 'simplex-noise';
 
 const container = document.querySelector('#img_wrapper');
 let planeAspect;
-let imageWidth = 300;
-let imageHeight = 200;
+let imageWidth = 150;
+let imageHeight = 150;
 const xOffset = imageWidth / 2;
 const yOffset = imageHeight / 2;
 
@@ -54,7 +54,7 @@ for (let i = 0; i < numPoints; i++) {
   offsets[i * 3 + 1] = yOffset - y;
   offsets[i * 3 + 2] = 0;
 
-  scales[i] = Math.random() * 1.1 + 1;
+  scales[i] = 1;
   angles[i] = Math.random() * Math.PI;
 }
 
@@ -63,17 +63,9 @@ for (let i = 0; i < (numPoints); i++) {
 }
 
 const images = [
-  '/img/lo-300.jpg',
-  '/img/lo-90-bw.jpg'
+  '/img/giacomo2-neutral.jpg',
+  '/img/bru-150.jpg'
 ]
-
-function updateInstanceColor(index, newColor) {
-  colors[index * 3 + 0] = newColor.r; // Red
-  colors[index * 3 + 1] = newColor.g; // Green
-  colors[index * 3 + 2] = newColor.b; // Blue
-  
-  mesh.geometry.attributes.instanceColor.needsUpdate = true;
-}
 
 function rgbaToGrayscale(r, g, b, a) {
   const grayscale = 0.299 * r + 0.587 * g + 0.114 * b;
@@ -102,32 +94,32 @@ function loopScale() {
   }
 }
 
-function loopOffset() {
-  for (let i = 0; i < numPoints; i++) {
-    const initialOffset = offsets[i];
-    const idx = indices[i];
-    const random = (Math.sin((Math.random()) - 0.5)) / 2;
+function turnOnRandomPixels() {
+  let newColors = new Float32Array(numPoints * 3);
 
-    let tl = gsap.timeline({
-      paused: true,
-      repeat: -1,
+  for (let i = 0; i < 100; i++) {
+      const randomIdx = Math.floor(Math.random() * numPoints);
+
+      newColors[randomIdx] = 1;
+      newColors[randomIdx + 1] = 1;
+      newColors[randomIdx + 2] = 1;
+
+      gsap.to(colors, {
+        [randomIdx * 3]: newColors[i * 3],
+        [randomIdx* 3 + 1]: newColors[i * 3 + 1],
+        [randomIdx * 3 + 2]: newColors[i * 3 + 2],
+        duration: 1,
+        ease: 'elastic.inOut(1.5, 0.5)',
+        onUpdate: () => {
+          mesh.geometry.attributes.instanceColor.array[i * 3] = colors[i * 3];
+          mesh.geometry.attributes.instanceColor.array[i * 3 + 1] = colors[i * 3 + 1];
+          mesh.geometry.attributes.instanceColor.array[i * 3 + 2] = colors[i * 3 + 2];
+          mesh.geometry.attributes.instanceColor.needsUpdate = true;
+        },
+        delay: i * 0.01,
+        repeat: -1,
+        yoyo: true,
     })
-    
-    tl.to(offsets, {
-      [i * 3]: offsets[i * 3],
-      [i * 3 + 1]: `+=${random}`,
-      [i * 3 + 2]: offsets[i * 3 + 2],
-      duration: 1,
-      ease: 'power2.inOut',
-      onUpdate: () => {
-        mesh.geometry.attributes.offset.array[i] = offsets[i];
-        mesh.geometry.attributes.offset.needsUpdate = true;
-      },
-      // delay: i * 0.001,
-      yoyo: true,
-    });
-
-    tl.play()
   }
 }
 
@@ -140,14 +132,12 @@ container.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 
-const noise2D = createNoise2D();
-
 const material = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0.01 },
     uRandom: { value: 0.2 },
     uNoiseFrequency: { value: 0.2 },
-    uNoiseAmplitude: { value: 5.0 },
+    uNoiseAmplitude: { value: 0 },
   },
   vertexShader: `
     attribute vec3 offset;
@@ -239,21 +229,23 @@ const material = new THREE.ShaderMaterial({
       vec3 pos = position * scale + offset;
 
       // Generate separate noise values for x, y, and z displacements
-      float displacementX = snoise((pos + randomDisplacement) * uNoiseFrequency + vec3(uTime, 0.0, 0.0)) * uNoiseAmplitude;
-      float displacementY = snoise((pos + randomDisplacement) * uNoiseFrequency + vec3(0.0, uTime, 0.0)) * uNoiseAmplitude;
-      float displacementZ = snoise((pos + randomDisplacement) * uNoiseFrequency + vec3(0.0, 0.0, uTime)) * uNoiseAmplitude;
+      float displacementX = snoise((pos) * uNoiseFrequency + vec3(uTime, 0.0, 0.0)) * uNoiseAmplitude;
+      float displacementY = snoise((pos) * uNoiseFrequency + vec3(0.0, uTime, 0.0)) * uNoiseAmplitude;
+      float displacementZ = snoise((pos) * uNoiseFrequency + vec3(0.0, 0.0, uTime)) * uNoiseAmplitude;
 
       // Combine displacements into a vec3
       vec3 displacement = vec3(displacementX, displacementY, displacementZ);
 
       // Calculate the new position
-      vec3 newPos = pos + displacement / 3.0;
+      vec3 newPos = pos + displacement;
 
       gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
     }
   `,
   fragmentShader: `
     varying vec3 vColor;
+    uniform float uTime;
+
     void main() {
       gl_FragColor = vec4(vColor, 1.0);
     }
@@ -261,7 +253,7 @@ const material = new THREE.ShaderMaterial({
   vertexColors: true,
 });
 
-const geometry = new THREE.SphereGeometry(0.25, 4, 4);
+const geometry = new THREE.SphereGeometry(0.25, 10, 10);
 const bufferGeometry = new THREE.InstancedBufferGeometry().copy(geometry);
 
 bufferGeometry.setAttribute('indices', new THREE.InstancedBufferAttribute(indices, 1, false));
@@ -269,11 +261,9 @@ bufferGeometry.setAttribute('offset', new THREE.InstancedBufferAttribute(offsets
 bufferGeometry.setAttribute('scale', new THREE.InstancedBufferAttribute(scales, 1, false));
 bufferGeometry.setAttribute('angle', new THREE.InstancedBufferAttribute(angles, 1, false));
 bufferGeometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(colors, 3));
-bufferGeometry.setAttribute('randomDisplacement', new THREE.InstancedBufferAttribute(randomDisplacement, 1));
 
 const mesh = new THREE.InstancedMesh(bufferGeometry, material, numPoints);
 
-mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(colors, 3));
 mesh.instanceMatrix.needsUpdate = true;
 mesh.geometry.attributes.instanceColor.needsUpdate = true;
 
@@ -287,6 +277,8 @@ let isFirstLoad = true
 // createVShape(numPoints, offsets, mesh)
 // createSpiral(numPoints, offsets, scales, mesh)
 // loopOffset()
+
+turnOnRandomPixels()
 
 function setAttributesFromImage(image, isFirstLoad = false) {
   const texture = new THREE.TextureLoader().load(image, (texture) => {
@@ -312,8 +304,8 @@ function setAttributesFromImage(image, isFirstLoad = false) {
 
       const brightness = (red + green + blue) / 3;
 
-      const minScale = 1;
-      const maxScale = 1;
+      const minScale = 0.75;
+      const maxScale = 1.05;
       const colorBasedScale = minScale + brightness * (maxScale - minScale)
 
       newScales[j / 3] = colorBasedScale;
@@ -350,7 +342,7 @@ function setAttributesFromImage(image, isFirstLoad = false) {
   });
 }
 
-displaceRandom(numPoints, offsets, mesh, imageWidth, imageHeight);
+// displaceRandom(numPoints, offsets, mesh, imageWidth, imageHeight);
 
 let count = 0
 
@@ -373,7 +365,7 @@ pointLight.position.set(5, 5, 5);
 console.log(scene)
 
 // Set camera position
-camera.position.z = 80;
+camera.position.z = 120;
 
 // Handle window resize
 window.addEventListener('resize', () => {
