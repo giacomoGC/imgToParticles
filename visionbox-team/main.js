@@ -7,11 +7,12 @@ import extractPixelData from './functions/extractPixelData.js';
 import shuffleArray from './functions/shuffleArray.js';
 import createSpiral from './functions/createSpiral.js';
 import displaceRandom from './functions/displaceRandom.js'
+import { createNoise2D } from 'simplex-noise';
 
 const container = document.querySelector('#img_wrapper');
 let planeAspect;
-let imageWidth = 90;
-let imageHeight = 90;
+let imageWidth = 300;
+let imageHeight = 200;
 const xOffset = imageWidth / 2;
 const yOffset = imageHeight / 2;
 
@@ -19,7 +20,7 @@ const originalAspectRatio = 1.5;
 const calculatedHeight = container.clientWidth / originalAspectRatio;
 const planeHeight = 2;
 const planeWidth = planeHeight * originalAspectRatio;
-const numPoints = 90 * 90
+const numPoints = imageWidth * imageHeight
 const indices = new Uint16Array(numPoints)
 const offsets = new Float32Array(numPoints * 3);
 const angles = new Float32Array(numPoints);
@@ -32,31 +33,37 @@ const colors = new Float32Array(numPoints * 3);
 
 let randomDisplacement = new Float32Array(numPoints);
 
-const A_x = 50;  // Amplitude in x direction
-const A_y = 50;  // Amplitude in y direction
-const A_z = 50;  // Amplitude in z direction
-
-const frequencyX = 3;  // Frequency for x-axis
-const frequencyY = 2;  // Frequency for y-axis
-const frequencyZ = 4;  // Frequency for z-axis
-
-const phaseX = 0;  // Phase shift for x-axis
-const phaseY = Math.PI / 2;  // Phase shift for y-axis
-const phaseZ = Math.PI / 4;  // Phase shift for z-axis
-
 let t = 0;  // Time parameter for the Lissajous curves
 
-
 for (let i = 0; i < numPoints; i++) {
-  colors[i * 3 + 0] = 0.5;
-  colors[i * 3 + 1] = 0.5;
-  colors[i * 3 + 2] = 0.5;
+  const random = Math.random()
+
+  colors[i * 3 + 0] = random;
+  colors[i * 3 + 1] = random;
+  colors[i * 3 + 2] = random;
 
   indices[i] = i;
 }
 
+// Fill attributes with initial values
+for (let i = 0; i < numPoints; i++) {
+  const x = (i % imageWidth);
+  const y = Math.floor(i / imageWidth);
+
+  offsets[i * 3 + 0] = x - xOffset;
+  offsets[i * 3 + 1] = yOffset - y;
+  offsets[i * 3 + 2] = 0;
+
+  scales[i] = Math.random() * 1.1 + 1;
+  angles[i] = Math.random() * Math.PI;
+}
+
+for (let i = 0; i < (numPoints); i++) {
+  randomDisplacement[i] = (Math.random() - 0.5) / 5;
+}
+
 const images = [
-  '/img/giacomo2-neutral-modified.jpg',
+  '/img/lo-300.jpg',
   '/img/lo-90-bw.jpg'
 ]
 
@@ -96,28 +103,31 @@ function loopScale() {
 }
 
 function loopOffset() {
-  let tl = gsap.timeline({
-    paused: true,
-    repeat: -1,
-  })
   for (let i = 0; i < numPoints; i++) {
     const initialOffset = offsets[i];
     const idx = indices[i];
-    const random = (Math.sin(Math.random()) - 0.5);
+    const random = (Math.sin((Math.random()) - 0.5)) / 2;
+
+    let tl = gsap.timeline({
+      paused: true,
+      repeat: -1,
+    })
     
     tl.to(offsets, {
       [i * 3]: offsets[i * 3],
       [i * 3 + 1]: `+=${random}`,
       [i * 3 + 2]: offsets[i * 3 + 2],
-      duration: 3,
+      duration: 1,
       ease: 'power2.inOut',
       onUpdate: () => {
         mesh.geometry.attributes.offset.array[i] = offsets[i];
         mesh.geometry.attributes.offset.needsUpdate = true;
       },
       // delay: i * 0.001,
-      //yoyo: true,
+      yoyo: true,
     });
+
+    tl.play()
   }
 }
 
@@ -130,10 +140,14 @@ container.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 
+const noise2D = createNoise2D();
+
 const material = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0.01 },
-    uRandom: { value: 1.0 },
+    uRandom: { value: 0.2 },
+    uNoiseFrequency: { value: 0.2 },
+    uNoiseAmplitude: { value: 5.0 },
   },
   vertexShader: `
     attribute vec3 offset;
@@ -143,16 +157,97 @@ const material = new THREE.ShaderMaterial({
     attribute float randomDisplacement;
     varying vec3 vColor;
     uniform float uTime;
+    uniform float uNoiseFrequency;
+    uniform float uNoiseAmplitude;
+
+    vec4 permute(vec4 x) {
+      return mod(((x*34.0)+1.0)*x, 289.0);
+    }
+
+    float snoise(vec3 v) { 
+      const vec2 C = vec2(1.0/6.0, 1.0/3.0) ;
+      const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+
+      // First corner
+      vec3 i  = floor(v + dot(v, C.yyy) );
+      vec3 x0 =   v - i + dot(i, C.xxx) ;
+
+      // Other corners
+      vec3 g = step(x0.yzx, x0.xyz);
+      vec3 l = 1.0 - g;
+      vec3 i1 = min( g.xyz, l.zxy );
+      vec3 i2 = max( g.xyz, l.zxy );
+
+      //   x0 = x0 - 0. + 0.0 * C 
+      vec3 x1 = x0 - i1 + C.xxx;
+      vec3 x2 = x0 - i2 + C.yyy; 
+      vec3 x3 = x0 - D.yyy;     
+
+      // Permutations
+      i = mod(i, 289.0 ); 
+      vec4 p = permute( permute( permute( 
+                i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+              + i.y + vec4(0.0, i1.y, i2.y, 1.0 )) 
+              + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+
+      // Gradients: 7x7 points over a square, mapped onto an octahedron.
+      float n_ = 1.0/7.0; // N=7
+      vec3  ns = n_ * D.wyz - D.xzx;
+
+      vec4 j = p - 49.0 * floor(p * ns.z * ns.z);  // mod(p,N)
+
+      vec4 x_ = floor(j * ns.z);
+      vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)
+
+      vec4 x = x_ *ns.x + ns.yyyy;
+      vec4 y = y_ *ns.x + ns.yyyy;
+      vec4 h = 1.0 - abs(x) - abs(y);
+
+      vec4 b0 = vec4( x.xy, y.xy );
+      vec4 b1 = vec4( x.zw, y.zw );
+
+      vec4 s0 = floor(b0)*2.0 + 1.0;
+      vec4 s1 = floor(b1)*2.0 + 1.0;
+      vec4 sh = -step(h, vec4(0.0));
+
+      vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+      vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+
+      vec3 p0 = vec3(a0.xy,h.x);
+      vec3 p1 = vec3(a0.zw,h.y);
+      vec3 p2 = vec3(a1.xy,h.z);
+      vec3 p3 = vec3(a1.zw,h.w);
+
+      // Normalise gradients
+      vec4 norm = 1.79284291400159 - 0.85373472095314 * 
+        vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3));
+      p0 *= norm.x;
+      p1 *= norm.y;
+      p2 *= norm.z;
+      p3 *= norm.w;
+
+      // Mix final noise value
+      vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), 
+        dot(x2,x2), dot(x3,x3)), 0.0);
+      m = m * m;
+      return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), 
+        dot(p2,x2), dot(p3,x3) ) );
+    }
 
     void main() {
       vColor = instanceColor;
-      vec3 pos = position;
+      vec3 pos = position * scale + offset;
 
-      vec3 newPos = (position * scale + offset) + (sin(uTime * randomDisplacement * 3.0) - 0.5);
+      // Generate separate noise values for x, y, and z displacements
+      float displacementX = snoise((pos + randomDisplacement) * uNoiseFrequency + vec3(uTime, 0.0, 0.0)) * uNoiseAmplitude;
+      float displacementY = snoise((pos + randomDisplacement) * uNoiseFrequency + vec3(0.0, uTime, 0.0)) * uNoiseAmplitude;
+      float displacementZ = snoise((pos + randomDisplacement) * uNoiseFrequency + vec3(0.0, 0.0, uTime)) * uNoiseAmplitude;
 
-      // float colorBasedDisplacement = (vColor.r + vColor.g + vColor.b) - 0.5;
+      // Combine displacements into a vec3
+      vec3 displacement = vec3(displacementX, displacementY, displacementZ);
 
-      //newPos = vec3(newPos.x + colorBasedDisplacement, newPos.y + colorBasedDisplacement, newPos.y + colorBasedDisplacement);
+      // Calculate the new position
+      vec3 newPos = pos + displacement / 3.0;
 
       gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
     }
@@ -168,23 +263,6 @@ const material = new THREE.ShaderMaterial({
 
 const geometry = new THREE.SphereGeometry(0.25, 4, 4);
 const bufferGeometry = new THREE.InstancedBufferGeometry().copy(geometry);
-
-// Fill attributes with initial values
-for (let i = 0; i < numPoints; i++) {
-  const x = (i % imageWidth);
-  const y = Math.floor(i / imageWidth);
-
-  offsets[i * 3 + 0] = x - xOffset;
-  offsets[i * 3 + 1] = yOffset - y;
-  offsets[i * 3 + 2] = 0;
-
-  scales[i] = Math.random() * 1.1 + 1;
-  angles[i] = Math.random() * Math.PI;
-}
-
-for (let i = 0; i < (numPoints); i++) {
-  randomDisplacement[i] = Math.random();
-}
 
 bufferGeometry.setAttribute('indices', new THREE.InstancedBufferAttribute(indices, 1, false));
 bufferGeometry.setAttribute('offset', new THREE.InstancedBufferAttribute(offsets, 3, false));
@@ -210,8 +288,6 @@ let isFirstLoad = true
 // createSpiral(numPoints, offsets, scales, mesh)
 // loopOffset()
 
-// displaceRandom(numPoints, offsets, mesh, imageWidth, imageHeight)
-
 function setAttributesFromImage(image, isFirstLoad = false) {
   const texture = new THREE.TextureLoader().load(image, (texture) => {
     pixelData = extractPixelData(texture.image);
@@ -230,28 +306,45 @@ function setAttributesFromImage(image, isFirstLoad = false) {
       const green = pixelData[i + 1] / 255;
       const blue = pixelData[i + 2] / 255;
     
-      newColors[j] = red;      // Red at index j
-      newColors[j + 1] = green; // Green at index j + 1
-      newColors[j + 2] = blue;  // Blue at index j + 2
+      newColors[j] = red;
+      newColors[j + 1] = green;
+      newColors[j + 2] = blue;
 
       const brightness = (red + green + blue) / 3;
 
-      const minScale = 1.5;
-      const maxScale = 3;
+      const minScale = 1;
+      const maxScale = 1;
       const colorBasedScale = minScale + brightness * (maxScale - minScale)
 
       newScales[j / 3] = colorBasedScale;
     }
 
-    mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(newColors, 3));
-    mesh.geometry.setAttribute('scale', new THREE.InstancedBufferAttribute(newScales, 1));
-    mesh.geometry.attributes.instanceColor.needsUpdate = true;
-    mesh.geometry.attributes.scale.needsUpdate = true;
-    // mesh.geometry.setAttribute('scale', new THREE.InstancedBufferAttribute(newScales, 1));
-    // mesh.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(newColors, 4));
-    // mesh.instanceMatrix.needsUpdate = true;
-    // mesh.geometry.attributes.instanceColor.needsUpdate = true;
-    mesh.geometry.attributes.scale.needsUpdate = true;
+    for (let i = 0; i < numPoints; i++) {
+      gsap.to(colors, {
+        [i * 3]: newColors[i * 3],
+        [i * 3 + 1]: newColors[i * 3 + 1],
+        [i * 3 + 2]: newColors[i * 3 + 2],
+        duration: 2,
+        ease: 'power2.inOut',
+        onUpdate: () => {
+          mesh.geometry.attributes.instanceColor.array[i * 3] = colors[i * 3];
+          mesh.geometry.attributes.instanceColor.array[i * 3 + 1] = colors[i * 3 + 1];
+          mesh.geometry.attributes.instanceColor.array[i * 3 + 2] = colors[i * 3 + 2];
+          mesh.geometry.attributes.instanceColor.needsUpdate = true;
+        },
+        // delay: i * 0.0001
+      });
+
+      gsap.to(scales, {
+        [i]: newScales[i],
+        duration: 4.5,
+        ease: 'power2.inOut',
+        onUpdate: () => {
+          mesh.geometry.attributes.scale.array[i] = scales[i];
+          mesh.geometry.attributes.scale.needsUpdate = true;
+        },
+      });
+    }
 
     isFirstLoad = false;
   });
